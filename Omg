@@ -31,7 +31,6 @@ local function teleportTo(cf)
 end
 local function nameCI(a, b) return string.lower(a) == string.lower(b) end
 
--- 右上角「換服」按鈕
 local swFrame = Instance.new("Frame")
 swFrame.Size                = UDim2.new(0, 90, 0, 36)
 swFrame.Position            = UDim2.new(1, -100, 0, 10)
@@ -55,113 +54,79 @@ local pendingOrbCF = nil
 local function showSwBtn(cf) pendingOrbCF = cf; swFrame.Visible = true end
 local function hideSwBtn()   pendingOrbCF = nil; swFrame.Visible = false end
 
--- ============================================================
---               跳服邏輯（來自貓玲腳本）
--- ============================================================
-
 local function joinSmallestServer()
     if switchServerPending then return end
     switchServerPending = true
     print("[OrbScript] 開始跳服（最少人）...")
     local pid = game.PlaceId
-
     local success, result = pcall(function()
         local response = HttpService:JSONDecode(
             game:HttpGet("https://games.roblox.com/v1/games/" .. pid .. "/servers/Public?sortOrder=Asc&limit=100")
         )
         if response.data and #response.data > 0 then
-            table.sort(response.data, function(a, b)
-                return a.playing < b.playing
-            end)
+            table.sort(response.data, function(a, b) return a.playing < b.playing end)
             local valid = {}
             for _, s in ipairs(response.data) do
-                if s.id ~= game.JobId then
-                    table.insert(valid, s)
-                end
+                if s.id ~= game.JobId then table.insert(valid, s) end
             end
             local targetServer = valid[8] or valid[1]
             if targetServer and targetServer.id then
-                print(string.format("[OrbScript] 跳往 %s（人數：%d）", targetServer.id, targetServer.playing))
                 TeleportService:TeleportToPlaceInstance(pid, targetServer.id)
             else
-                warn("[OrbScript] 找不到適合的伺服器，隨機跳")
                 TeleportService:Teleport(pid, LocalPlayer)
             end
         else
-            warn("[OrbScript] 無法獲取伺服器列表，隨機跳")
             TeleportService:Teleport(pid, LocalPlayer)
         end
     end)
-
-    if not success then
-        warn("[OrbScript] 跳服失敗：" .. tostring(result) .. "，隨機跳")
-        TeleportService:Teleport(pid, LocalPlayer)
-    end
+    if not success then TeleportService:Teleport(pid, LocalPlayer) end
 end
 
 local function joinMostPlayedServer()
     if switchServerPending then return end
     switchServerPending = true
-    print("[OrbScript] 開始跳服（最多人）...")
     local pid = game.PlaceId
-
     local success, result = pcall(function()
         local response = HttpService:JSONDecode(
             game:HttpGet("https://games.roblox.com/v1/games/" .. pid .. "/servers/Public?sortOrder=Asc&limit=100")
         )
         if response.data and #response.data > 0 then
-            local maxPlayers = game.Players.MaxPlayers
-            local targetPlayers = math.floor(maxPlayers * 3 / 4)
+            local targetPlayers = math.floor(game.Players.MaxPlayers * 3 / 4)
             local valid = {}
             for _, s in ipairs(response.data) do
-                if s.id ~= game.JobId then
-                    table.insert(valid, s)
-                end
+                if s.id ~= game.JobId then table.insert(valid, s) end
             end
             table.sort(valid, function(a, b)
                 return math.abs(a.playing - targetPlayers) < math.abs(b.playing - targetPlayers)
             end)
             local targetServer = valid[1]
             if targetServer and targetServer.id then
-                print(string.format("[OrbScript] 跳往 %s（人數：%d）", targetServer.id, targetServer.playing))
                 TeleportService:TeleportToPlaceInstance(pid, targetServer.id)
             else
-                warn("[OrbScript] 找不到適合的伺服器，隨機跳")
                 TeleportService:Teleport(pid, LocalPlayer)
             end
         else
-            warn("[OrbScript] 無法獲取伺服器列表，隨機跳")
             TeleportService:Teleport(pid, LocalPlayer)
         end
     end)
-
-    if not success then
-        warn("[OrbScript] 跳服失敗：" .. tostring(result) .. "，隨機跳")
-        TeleportService:Teleport(pid, LocalPlayer)
-    end
+    if not success then TeleportService:Teleport(pid, LocalPlayer) end
 end
 
 local function hopServer()
-    if SERVER_HOP_MODE == 1 then
-        joinSmallestServer()
-    elseif SERVER_HOP_MODE == 2 then
-        joinMostPlayedServer()
+    if SERVER_HOP_MODE == 1 then joinSmallestServer()
+    elseif SERVER_HOP_MODE == 2 then joinMostPlayedServer()
     else
         if switchServerPending then return end
         switchServerPending = true
-        print("[OrbScript] 開始跳服（隨機）...")
         TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end
 end
-
--- ============================================================
 
 swBtn.MouseButton1Click:Connect(function()
     if pendingOrbCF then teleportTo(pendingOrbCF) end
     hideSwBtn(); hopServer()
 end)
 
--- 右下角 MATERIALIZEOrb 提示框
 local matFrame = Instance.new("Frame")
 matFrame.Size                = UDim2.new(0, 240, 0, 70)
 matFrame.Position            = UDim2.new(1, -250, 1, -90)
@@ -173,27 +138,23 @@ matFrame.Parent              = ScreenGui
 local _mC = Instance.new("UICorner"); _mC.CornerRadius = UDim.new(0,8); _mC.Parent = matFrame
 
 local matLbl = Instance.new("TextLabel")
-matLbl.Size               = UDim2.new(1, 0, 0.5, 0)
-matLbl.BackgroundTransparency = 1
-matLbl.Text               = "有物質化光球，要傳送嗎？"
-matLbl.TextColor3         = Color3.fromRGB(255, 255, 255)
-matLbl.TextScaled         = true
-matLbl.Font               = Enum.Font.Gotham
-matLbl.Parent             = matFrame
+matLbl.Size = UDim2.new(1,0,0.5,0); matLbl.BackgroundTransparency = 1
+matLbl.Text = "有物質化光球，要傳送嗎？"; matLbl.TextColor3 = Color3.fromRGB(255,255,255)
+matLbl.TextScaled = true; matLbl.Font = Enum.Font.Gotham; matLbl.Parent = matFrame
 
 local matYes = Instance.new("TextButton")
 matYes.Size = UDim2.new(0.45,0,0.45,0); matYes.Position = UDim2.new(0.05,0,0.52,0)
 matYes.BackgroundColor3 = Color3.fromRGB(60,180,60); matYes.Text = "Yes"
 matYes.TextColor3 = Color3.fromRGB(255,255,255); matYes.TextScaled = true
 matYes.Font = Enum.Font.GothamBold; matYes.Parent = matFrame
-local _myC = Instance.new("UICorner"); _myC.CornerRadius = UDim.new(0,6); _myC.Parent = matYes
+Instance.new("UICorner").Parent = matYes
 
 local matNo = Instance.new("TextButton")
 matNo.Size = UDim2.new(0.45,0,0.45,0); matNo.Position = UDim2.new(0.52,0,0.52,0)
 matNo.BackgroundColor3 = Color3.fromRGB(180,60,60); matNo.Text = "No"
 matNo.TextColor3 = Color3.fromRGB(255,255,255); matNo.TextScaled = true
 matNo.Font = Enum.Font.GothamBold; matNo.Parent = matFrame
-local _mnC = Instance.new("UICorner"); _mnC.CornerRadius = UDim.new(0,6); _mnC.Parent = matNo
+Instance.new("UICorner").Parent = matNo
 
 local pendingMatCF = nil
 local function showMatPrompt(cf) pendingMatCF = cf; matFrame.Visible = true; materializePromptOpen = true end
@@ -204,27 +165,23 @@ matYes.MouseButton1Click:Connect(function()
 end)
 matNo.MouseButton1Click:Connect(function() hideMatPrompt() end)
 
--- 傳送到 teleport1
 local function goToTeleport1()
     for _, v in ipairs(workspace:GetDescendants()) do
         if nameCI(v.Name, "teleport1") and v:IsA("BasePart") then
-            teleportTo(v.CFrame)
-            print("[OrbScript] 已傳送到 teleport1")
-            return
+            teleportTo(v.CFrame); print("[OrbScript] 已傳送到 teleport1"); return
         end
     end
     warn("[OrbScript] 找不到 teleport1，跳過")
 end
 
--- 【變數1】Glove 傳送
 local function handleGloves()
     if GLOVE_TELEPORT ~= 1 then return end
     local arena = workspace:FindFirstChild("Arena")
-    if not arena then warn("[OrbScript] 找不到 Arena"); return end
+    if not arena then return end
     local island5 = arena:FindFirstChild("island5")
-    if not island5 then warn("[OrbScript] 找不到 island5"); return end
+    if not island5 then return end
     local slapples = island5:FindFirstChild("Slapples")
-    if not slapples then warn("[OrbScript] 找不到 Slapples"); return end
+    if not slapples then return end
     local root = getRootPart()
     if not root then return end
     local count = 0
@@ -238,10 +195,9 @@ local function handleGloves()
             end
         end
     end
-    print(string.format("[OrbScript] 傳送 %d 個 Glove 到自身位置", count))
+    print(string.format("[OrbScript] 傳送 %d 個 Glove", count))
 end
 
--- 任務旗標
 local tasksDone = {
     glove          = (GLOVE_TELEPORT == 0),
     jetOrb         = (JET_ORB_MODE == 0 or JET_ORB_MODE == 2),
@@ -250,7 +206,6 @@ local tasksDone = {
     materializeOrb = (MATERIALIZE_ORB_MODE == 0),
 }
 
--- Orb 偵測工具
 local handledOrbs = {}
 local function findOrb(name)
     for _, v in ipairs(workspace:GetDescendants()) do
@@ -259,30 +214,43 @@ local function findOrb(name)
     return nil
 end
 
--- 場上是否還有任何啟用中的 Orb
-local function anyOrbPresent()
-    if JET_ORB_MODE == 1 and findOrb("JetOrb") then return true end
-    if PHASE_ORB_MODE == 1 and findOrb("PhaseOrb") then return true end
-    if SIPHON_ORB_MODE == 1 and findOrb("SiphonOrb") then return true end
-    if MATERIALIZE_ORB_MODE == 1 and findOrb("MATERIALIZEOrb") then return true end
-    return false
-end
-
--- 雙重保險：旗標全完成 + 場上無殘留 Orb 才跳服
+-- ============================================================
+-- [修正] checkAndHop
+-- 問題：拿到一個 Orb 後，其他 Orb 不存在場上，
+--       但 tasksDone 仍是 false → 永遠等不到 → 不跳服
+-- 修正：每次呼叫時主動掃描場上，
+--       啟用但場上找不到的 Orb → 自動視為完成
+-- ============================================================
 local function checkAndHop()
     if JET_ORB_MODE == 2 or PHASE_ORB_MODE == 2 then return end
-    -- 1. 所有任務旗標必須完成
-    for _, done in pairs(tasksDone) do
+
+    -- 場上不存在的 Orb 自動打勾
+    if JET_ORB_MODE == 1 and not tasksDone.jetOrb and not findOrb("JetOrb") then
+        print("[OrbScript] 場上無 JetOrb，視為完成")
+        tasksDone.jetOrb = true
+    end
+    if PHASE_ORB_MODE == 1 and not tasksDone.phaseOrb and not findOrb("PhaseOrb") then
+        print("[OrbScript] 場上無 PhaseOrb，視為完成")
+        tasksDone.phaseOrb = true
+    end
+    if SIPHON_ORB_MODE == 1 and not tasksDone.siphonOrb and not findOrb("SiphonOrb") then
+        print("[OrbScript] 場上無 SiphonOrb，視為完成")
+        tasksDone.siphonOrb = true
+    end
+    if MATERIALIZE_ORB_MODE == 1 and not tasksDone.materializeOrb and not findOrb("MATERIALIZEOrb") then
+        print("[OrbScript] 場上無 MATERIALIZEOrb，視為完成")
+        tasksDone.materializeOrb = true
+    end
+
+    -- 全部完成才跳服
+    for key, done in pairs(tasksDone) do
         if not done then
-            print("[OrbScript] 還有任務未完成，等待中...")
+            print(string.format("[OrbScript] 等待任務：%s", key))
             return
         end
     end
-    -- 2. 場上必須無殘留 Orb
-    if anyOrbPresent() then
-        print("[OrbScript] 場上仍有 Orb，等待中...")
-        return
-    end
+
+    print("[OrbScript] 所有任務完成，跳服")
     hopServer()
 end
 
@@ -298,67 +266,55 @@ local function handleOrb(orbName, mode, onFound)
                 if string.lower(orbName) == "materializeorb" and materializePromptOpen then
                     hideMatPrompt()
                 end
-                -- Orb 消失後再次嘗試跳服（可能是最後一顆）
-                checkAndHop()
             end
         end)
     end
 end
 
--- 主偵測迴圈
+local function anyOrbPresent()
+    if JET_ORB_MODE == 1 and findOrb("JetOrb") then return true end
+    if PHASE_ORB_MODE == 1 and findOrb("PhaseOrb") then return true end
+    if SIPHON_ORB_MODE == 1 and findOrb("SiphonOrb") then return true end
+    if MATERIALIZE_ORB_MODE == 1 and findOrb("MATERIALIZEOrb") then return true end
+    return false
+end
+
 RunService.Heartbeat:Connect(function()
     if not orbDetectionEnabled then return end
 
-    -- 【變數2】JetOrb
     if JET_ORB_MODE ~= 0 then
         handleOrb("JetOrb", JET_ORB_MODE, function(orb)
             if JET_ORB_MODE == 1 then
-                teleportTo(orb.CFrame)
-                tasksDone.jetOrb = true
-                checkAndHop()  -- 改走 checkAndHop，等其他 Orb
-            else
-                showSwBtn(orb.CFrame)
-            end
+                teleportTo(orb.CFrame); tasksDone.jetOrb = true; checkAndHop()
+            else showSwBtn(orb.CFrame) end
         end)
     end
 
-    -- 【變數3】PhaseOrb
     if PHASE_ORB_MODE ~= 0 then
         handleOrb("PhaseOrb", PHASE_ORB_MODE, function(orb)
             if PHASE_ORB_MODE == 1 then
-                teleportTo(orb.CFrame)
-                tasksDone.phaseOrb = true
-                checkAndHop()  -- 改走 checkAndHop，等其他 Orb
-            else
-                showSwBtn(orb.CFrame)
-            end
+                teleportTo(orb.CFrame); tasksDone.phaseOrb = true; checkAndHop()
+            else showSwBtn(orb.CFrame) end
         end)
     end
 
-    -- 【變數4】SiphonOrb
     if SIPHON_ORB_MODE == 1 then
         handleOrb("SiphonOrb", 1, function(orb)
-            teleportTo(orb.CFrame)
-            tasksDone.siphonOrb = true
-            checkAndHop()
+            teleportTo(orb.CFrame); tasksDone.siphonOrb = true; checkAndHop()
         end)
     end
 
-    -- 【變數5】MATERIALIZEOrb
     if MATERIALIZE_ORB_MODE == 1 then
         handleOrb("MATERIALIZEOrb", 1, function(orb)
             if JET_ORB_MODE == 2 or PHASE_ORB_MODE == 2 then
                 if not materializePromptOpen then showMatPrompt(orb.CFrame) end
             else
-                teleportTo(orb.CFrame)
-                tasksDone.materializeOrb = true
-                checkAndHop()
+                teleportTo(orb.CFrame); tasksDone.materializeOrb = true; checkAndHop()
             end
         end)
     end
 end)
 
--- 初始化流程
 task.spawn(function()
     task.wait(1)
     goToTeleport1()
@@ -380,14 +336,3 @@ print("[OrbScript] 腳本已啟動")
 print(string.format("  VAR1=%d VAR2=%d VAR3=%d VAR4=%d VAR5=%d VAR6=%d",
     GLOVE_TELEPORT, JET_ORB_MODE, PHASE_ORB_MODE,
     SIPHON_ORB_MODE, MATERIALIZE_ORB_MODE, SERVER_HOP_MODE))
-```
-
-**跳服條件的完整流程現在是：**
-```
-偵測到 Orb A → 傳送 → 標記 A 完成 → checkAndHop()
-  └─ 旗標全完成？ → 還有 Orb B 存在 → 不跳，繼續等
-偵測到 Orb B → 傳送 → 標記 B 完成 → checkAndHop()
-  └─ 旗標全完成？ → 場上無 Orb → 跳服 ✓
-
-另外 Orb 消失時（AncestryChanged）也會再觸發一次 checkAndHop()，
-作為保險防止 Orb 被別人拿走導致場上已清空但腳本還在等的情況。
