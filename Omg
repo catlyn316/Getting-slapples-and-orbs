@@ -1,0 +1,434 @@
+-- ============================================================
+--                     ★ 腳本主體（勿隨意修改）★
+-- ============================================================
+
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local HttpService    = game:GetService("HttpService")
+local LocalPlayer    = Players.LocalPlayer
+local Character      = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local RootPart       = Character:WaitForChild("HumanoidRootPart")
+
+-- GUI 根節點
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OrbHUD"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- 狀態旗標
+local switchServerPending = false  -- 是否已觸發換服流程
+local materializePromptOpen = false
+
+-- ──────────────────────────────────────────────
+-- 工具函式
+-- ──────────────────────────────────────────────
+
+-- 取得最新 RootPart（角色重生後更新）
+local function getRootPart()
+    Character = LocalPlayer.Character
+    if Character then
+        RootPart = Character:FindFirstChild("HumanoidRootPart")
+    end
+    return RootPart
+end
+
+-- 傳送角色到目標 CFrame
+local function teleportTo(cframe)
+    local root = getRootPart()
+    if root then
+        root.CFrame = cframe
+    end
+end
+
+-- 不區分大小寫搜尋名稱
+local function nameMatchCI(name, target)
+    return string.lower(name) == string.lower(target)
+end
+
+-- 在 workspace 遞迴尋找符合名稱（不分大小寫）的物件
+local function findInstanceCI(parent, targetName)
+    for _, v in ipairs(parent:GetDescendants()) do
+        if nameMatchCI(v.Name, targetName) then
+            return v
+        end
+    end
+    return nil
+end
+
+-- 在 workspace 頂層子物件尋找
+local function findInWorkspaceCI(targetName)
+    for _, v in ipairs(workspace:GetChildren()) do
+        if nameMatchCI(v.Name, targetName) then
+            return v
+        end
+    end
+    return nil
+end
+
+-- ──────────────────────────────────────────────
+-- 建立右上角「換服」按鈕（變數2或3為2時使用）
+-- ──────────────────────────────────────────────
+local switchButtonFrame = Instance.new("Frame")
+switchButtonFrame.Size = UDim2.new(0, 90, 0, 36)
+switchButtonFrame.Position = UDim2.new(1, -100, 0, 10)
+switchButtonFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+switchButtonFrame.BackgroundTransparency = 0.3
+switchButtonFrame.BorderSizePixel = 0
+switchButtonFrame.Visible = false
+switchButtonFrame.Parent = ScreenGui
+
+local switchButtonCorner = Instance.new("UICorner")
+switchButtonCorner.CornerRadius = UDim.new(0, 8)
+switchButtonCorner.Parent = switchButtonFrame
+
+local switchButton = Instance.new("TextButton")
+switchButton.Size = UDim2.new(1, 0, 1, 0)
+switchButton.BackgroundTransparency = 1
+switchButton.Text = "換服"
+switchButton.TextColor3 = Color3.fromRGB(255, 220, 60)
+switchButton.TextScaled = true
+switchButton.Font = Enum.Font.GothamBold
+switchButton.Parent = switchButtonFrame
+
+-- 換服按鈕的目標記憶（儲存待跳服的 orb CFrame）
+local pendingOrbCFrame = nil
+
+local function showSwitchButton(orbCFrame)
+    pendingOrbCFrame = orbCFrame
+    switchButtonFrame.Visible = true
+end
+
+local function hideSwitchButton()
+    pendingOrbCFrame = nil
+    switchButtonFrame.Visible = false
+end
+
+-- ──────────────────────────────────────────────
+-- 跳服邏輯
+-- ──────────────────────────────────────────────
+
+-- 依照 SERVER_HOP_MODE 挑選伺服器並跳過去
+local function hopServer()
+    if switchServerPending then return end
+    switchServerPending = true
+
+    local placeId = game.PlaceId
+    local success, pages = pcall(function()
+        return TeleportService:GetPlayerPlaceInstanceAsync(placeId)
+    end)
+
+    -- 嘗試透過 GetPlayerPlaceInstanceAsync 找空服（Roblox 限制下的替代方案）
+    -- 實際跳服使用 TeleportToPlaceInstance 或 TeleportAsync
+    local function doTeleport(jobId)
+        if jobId then
+            TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer)
+        else
+            TeleportService:Teleport(placeId, LocalPlayer)
+        end
+    end
+
+    -- 使用 HttpService 取得伺服器列表（需遊戲允許 HTTP）
+    local ok, result = pcall(function()
+        local url = "https://games.roproxy.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100"
+        local response = HttpService:GetAsync(url)
+        return HttpService:JSONDecode(response)
+    end)
+
+    if ok and result and result.data then
+        local servers = result.data
+        local chosen = nil
+
+        if SERVER_HOP_MODE == 1 then
+            -- 人數最少（< 4 優先，否則選最少）
+            local best = nil
+            for _, s in ipairs(servers) do
+                if s.playing and s.id ~= game.JobId then
+                    if s.playing < 4 then
+                        chosen = s
+                        break
+                    end
+                    if not best or s.playing < best.playing then
+                        best = s
+                    end
+                end
+            end
+            if not chosen then chosen = best end
+
+        elseif SERVER_HOP_MODE == 2 then
+            -- 人數 12～14
+            for _, s in ipairs(servers) do
+                if s.playing and s.id ~= game.JobId then
+                    if s.playing >= 12 and s.playing <= 14 then
+                        chosen = s
+                        break
+                    end
+                end
+            end
+
+        else
+            -- 隨機
+            local valid = {}
+            for _, s in ipairs(servers) do
+                if s.id ~= game.JobId then
+                    table.insert(valid, s)
+                end
+            end
+            if #valid > 0 then
+                chosen = valid[math.random(1, #valid)]
+            end
+        end
+
+        if chosen then
+            doTeleport(chosen.id)
+        else
+            -- 沒找到符合條件的就隨機跳
+            TeleportService:Teleport(placeId, LocalPlayer)
+        end
+    else
+        -- HTTP 失敗則直接隨機跳
+        TeleportService:Teleport(placeId, LocalPlayer)
+    end
+end
+
+-- 按下換服按鈕時觸發
+switchButton.MouseButton1Click:Connect(function()
+    if pendingOrbCFrame then
+        teleportTo(pendingOrbCFrame)
+    end
+    hideSwitchButton()
+    hopServer()
+end)
+
+-- ──────────────────────────────────────────────
+-- 右下角 MATERIALIZEOrb 提示框
+-- ──────────────────────────────────────────────
+local materializeFrame = Instance.new("Frame")
+materializeFrame.Size = UDim2.new(0, 240, 0, 70)
+materializeFrame.Position = UDim2.new(1, -250, 1, -90)
+materializeFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+materializeFrame.BackgroundTransparency = 0.2
+materializeFrame.BorderSizePixel = 0
+materializeFrame.Visible = false
+materializeFrame.Parent = ScreenGui
+
+local matCorner = Instance.new("UICorner")
+matCorner.CornerRadius = UDim.new(0, 8)
+matCorner.Parent = materializeFrame
+
+local matLabel = Instance.new("TextLabel")
+matLabel.Size = UDim2.new(1, 0, 0.5, 0)
+matLabel.BackgroundTransparency = 1
+matLabel.Text = "有物質化光球，要傳送嗎？"
+matLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+matLabel.TextScaled = true
+matLabel.Font = Enum.Font.Gotham
+matLabel.Parent = materializeFrame
+
+local matYes = Instance.new("TextButton")
+matYes.Size = UDim2.new(0.45, 0, 0.45, 0)
+matYes.Position = UDim2.new(0.05, 0, 0.52, 0)
+matYes.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
+matYes.Text = "Yes"
+matYes.TextColor3 = Color3.fromRGB(255, 255, 255)
+matYes.TextScaled = true
+matYes.Font = Enum.Font.GothamBold
+matYes.Parent = materializeFrame
+
+local matYesCorner = Instance.new("UICorner")
+matYesCorner.CornerRadius = UDim.new(0, 6)
+matYesCorner.Parent = matYes
+
+local matNo = Instance.new("TextButton")
+matNo.Size = UDim2.new(0.45, 0, 0.45, 0)
+matNo.Position = UDim2.new(0.52, 0, 0.52, 0)
+matNo.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+matNo.Text = "No"
+matNo.TextColor3 = Color3.fromRGB(255, 255, 255)
+matNo.TextScaled = true
+matNo.Font = Enum.Font.GothamBold
+matNo.Parent = materializeFrame
+
+local pendingMatCFrame = nil
+
+local function showMaterializePrompt(cframe)
+    pendingMatCFrame = cframe
+    materializeFrame.Visible = true
+    materializePromptOpen = true
+end
+
+local function hideMaterializePrompt()
+    materializeFrame.Visible = false
+    materializePromptOpen = false
+    pendingMatCFrame = nil
+end
+
+matYes.MouseButton1Click:Connect(function()
+    if pendingMatCFrame then
+        teleportTo(pendingMatCFrame)
+    end
+    hideMaterializePrompt()
+end)
+
+matNo.MouseButton1Click:Connect(function()
+    hideMaterializePrompt()
+end)
+
+-- ──────────────────────────────────────────────
+-- 【變數1】Glove 傳送
+-- ──────────────────────────────────────────────
+local function handleGloves()
+    if GLOVE_TELEPORT ~= 1 then return end
+
+    local arena = workspace:FindFirstChild("Arena")
+    if not arena then return end
+
+    for _, island in ipairs(arena:GetChildren()) do
+        -- 尋找每個 island 下的 Slapples
+        local slapples = island:FindFirstChild("Slapples")
+        if slapples then
+            for _, child in ipairs(slapples:GetChildren()) do
+                local glove = child:FindFirstChild("Glove")
+                if glove and glove:IsA("BasePart") then
+                    local root = getRootPart()
+                    if root then
+                        glove.CFrame = root.CFrame
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ──────────────────────────────────────────────
+-- 通用 Orb 偵測函式
+-- ──────────────────────────────────────────────
+
+-- 已處理過的 Orb 實例（避免重複觸發）
+local handledOrbs = {}
+
+local function findOrbInWorkspace(orbName)
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if nameMatchCI(v.Name, orbName) and v:IsA("BasePart") then
+            return v
+        end
+    end
+    return nil
+end
+
+local function handleOrb(orbName, mode, onFound)
+    if mode == 0 then return end
+    local orb = findOrbInWorkspace(orbName)
+    if orb and not handledOrbs[orb] then
+        handledOrbs[orb] = true
+        onFound(orb)
+        -- 當 Orb 消失時重置記憶
+        orb.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then
+                handledOrbs[orb] = nil
+                -- 若物質化提示開著且該 Orb 消失則關閉提示
+                if orbName == "materializeorb" and materializePromptOpen then
+                    hideMaterializePrompt()
+                end
+            end
+        end)
+    end
+end
+
+-- ──────────────────────────────────────────────
+-- 流程完成後跳服
+-- ──────────────────────────────────────────────
+
+-- 判斷所有「自動」任務是否完成（不含需玩家手動確認的）
+local tasksDone = {
+    glove = GLOVE_TELEPORT == 0,       -- 0 = 不需要做 = 已完成
+    jetOrb = JET_ORB_MODE == 0 or JET_ORB_MODE == 2,
+    phaseOrb = PHASE_ORB_MODE == 0 or PHASE_ORB_MODE == 2,
+    siphonOrb = SIPHON_ORB_MODE == 0,
+    materializeOrb = MATERIALIZE_ORB_MODE == 0,
+}
+
+local function checkAndHop()
+    -- 如果有換服按鈕模式開著，不自動跳
+    if JET_ORB_MODE == 2 or PHASE_ORB_MODE == 2 then return end
+
+    for _, done in pairs(tasksDone) do
+        if not done then return end
+    end
+    hopServer()
+end
+
+-- ──────────────────────────────────────────────
+-- 主偵測迴圈
+-- ──────────────────────────────────────────────
+RunService.Heartbeat:Connect(function()
+    -- 【變數2】JetOrb
+    if JET_ORB_MODE ~= 0 then
+        handleOrb("JetOrb", JET_ORB_MODE, function(orb)
+            local cf = orb.CFrame
+            if JET_ORB_MODE == 1 then
+                teleportTo(cf)
+                tasksDone.jetOrb = true
+                hopServer()
+            elseif JET_ORB_MODE == 2 then
+                showSwitchButton(cf)
+            end
+        end)
+    end
+
+    -- 【變數3】PhaseOrb
+    if PHASE_ORB_MODE ~= 0 then
+        handleOrb("PhaseOrb", PHASE_ORB_MODE, function(orb)
+            local cf = orb.CFrame
+            if PHASE_ORB_MODE == 1 then
+                teleportTo(cf)
+                tasksDone.phaseOrb = true
+                hopServer()
+            elseif PHASE_ORB_MODE == 2 then
+                showSwitchButton(cf)
+            end
+        end)
+    end
+
+    -- 【變數4】SiphonOrb
+    if SIPHON_ORB_MODE == 1 then
+        handleOrb("SiphonOrb", SIPHON_ORB_MODE, function(orb)
+            teleportTo(orb.CFrame)
+            tasksDone.siphonOrb = true
+            checkAndHop()
+        end)
+    end
+
+    -- 【變數5】MATERIALIZEOrb（不分大小寫）
+    if MATERIALIZE_ORB_MODE == 1 then
+        handleOrb("MATERIALIZEOrb", MATERIALIZE_ORB_MODE, function(orb)
+            local cf = orb.CFrame
+            -- 若變數2或3為2，改為提示框
+            if JET_ORB_MODE == 2 or PHASE_ORB_MODE == 2 then
+                if not materializePromptOpen then
+                    showMaterializePrompt(cf)
+                end
+            else
+                teleportTo(cf)
+                tasksDone.materializeOrb = true
+                checkAndHop()
+            end
+        end)
+    end
+end)
+
+-- ──────────────────────────────────────────────
+-- 初始化：執行一次性任務
+-- ──────────────────────────────────────────────
+task.spawn(function()
+    -- 【變數1】執行 Glove 傳送
+    task.wait(1)  -- 等待場景載入
+    handleGloves()
+    tasksDone.glove = true
+    checkAndHop()
+end)
+
+print("[OrbScript] 腳本已啟動 ✓")
+print(string.format("  GLOVE=%d | JET=%d | PHASE=%d | SIPHON=%d | MATERIALIZE=%d | HOP=%d",
+    GLOVE_TELEPORT, JET_ORB_MODE, PHASE_ORB_MODE, SIPHON_ORB_MODE, MATERIALIZE_ORB_MODE, SERVER_HOP_MODE))
