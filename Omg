@@ -14,6 +14,32 @@ local switchServerPending   = false
 local materializePromptOpen = false
 local orbDetectionEnabled   = false
 
+-- ============================================================
+-- [新增] 已訪問伺服器記錄（防止2分鐘內重複跳回）
+-- ============================================================
+local visitedServers = {}  -- { [jobId] = timestamp }
+local VISIT_COOLDOWN = 120 -- 秒（2分鐘）
+
+local function markVisited(jobId)
+    visitedServers[jobId] = tick()
+end
+
+local function isRecentlyVisited(jobId)
+    local t = visitedServers[jobId]
+    if t and (tick() - t) < VISIT_COOLDOWN then return true end
+    return false
+end
+
+local function cleanVisited()
+    local now = tick()
+    for id, t in pairs(visitedServers) do
+        if now - t >= VISIT_COOLDOWN then visitedServers[id] = nil end
+    end
+end
+
+-- 記錄當前服
+markVisited(game.JobId)
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name           = "OrbHUD"
 ScreenGui.ResetOnSpawn   = false
@@ -54,23 +80,45 @@ local pendingOrbCF = nil
 local function showSwBtn(cf) pendingOrbCF = cf; swFrame.Visible = true end
 local function hideSwBtn()   pendingOrbCF = nil; swFrame.Visible = false end
 
+-- ============================================================
+-- [修改] joinSmallestServer：範圍改為第8～第100個（排除近期訪問）
+-- ============================================================
 local function joinSmallestServer()
     if switchServerPending then return end
     switchServerPending = true
-    print("[OrbScript] 開始跳服（最少人）...")
+    cleanVisited()
+    print("[OrbScript] 開始跳服（少人模式：第8~100）...")
     local pid = game.PlaceId
     local success, result = pcall(function()
         local response = HttpService:JSONDecode(
             game:HttpGet("https://games.roblox.com/v1/games/" .. pid .. "/servers/Public?sortOrder=Asc&limit=100")
         )
         if response.data and #response.data > 0 then
+            -- 按人數由少到多排序
             table.sort(response.data, function(a, b) return a.playing < b.playing end)
+            -- 排除當前服 + 近期訪問的服
             local valid = {}
             for _, s in ipairs(response.data) do
-                if s.id ~= game.JobId then table.insert(valid, s) end
+                if s.id ~= game.JobId and not isRecentlyVisited(s.id) then
+                    table.insert(valid, s)
+                end
             end
-            local targetServer = valid[8] or valid[1]
+            -- 取第8到第100個（index 8~100，Lua 1-based）
+            local pool = {}
+            for i = 8, math.min(100, #valid) do
+                table.insert(pool, valid[i])
+            end
+            -- 若第8個之後沒有足夠伺服器，fallback 到有效清單最後幾個
+            if #pool == 0 then
+                pool = {}
+                for i = math.max(1, #valid - 2), #valid do
+                    table.insert(pool, valid[i])
+                end
+            end
+            local targetServer = pool[math.random(1, math.max(1, #pool))]
             if targetServer and targetServer.id then
+                markVisited(targetServer.id)
+                print(string.format("[OrbScript] 跳往伺服器（%d人）", targetServer.playing))
                 TeleportService:TeleportToPlaceInstance(pid, targetServer.id)
             else
                 TeleportService:Teleport(pid, LocalPlayer)
@@ -82,9 +130,13 @@ local function joinSmallestServer()
     if not success then TeleportService:Teleport(pid, LocalPlayer) end
 end
 
+-- ============================================================
+-- [修改] joinMostPlayedServer：加入近期訪問過濾
+-- ============================================================
 local function joinMostPlayedServer()
     if switchServerPending then return end
     switchServerPending = true
+    cleanVisited()
     local pid = game.PlaceId
     local success, result = pcall(function()
         local response = HttpService:JSONDecode(
@@ -94,13 +146,16 @@ local function joinMostPlayedServer()
             local targetPlayers = math.floor(game.Players.MaxPlayers * 3 / 4)
             local valid = {}
             for _, s in ipairs(response.data) do
-                if s.id ~= game.JobId then table.insert(valid, s) end
+                if s.id ~= game.JobId and not isRecentlyVisited(s.id) then
+                    table.insert(valid, s)
+                end
             end
             table.sort(valid, function(a, b)
                 return math.abs(a.playing - targetPlayers) < math.abs(b.playing - targetPlayers)
             end)
             local targetServer = valid[1]
             if targetServer and targetServer.id then
+                markVisited(targetServer.id)
                 TeleportService:TeleportToPlaceInstance(pid, targetServer.id)
             else
                 TeleportService:Teleport(pid, LocalPlayer)
@@ -112,13 +167,39 @@ local function joinMostPlayedServer()
     if not success then TeleportService:Teleport(pid, LocalPlayer) end
 end
 
+-- ============================================================
+-- [修改] hopServer（模式3）：加入近期訪問過濾
+-- ============================================================
 local function hopServer()
     if SERVER_HOP_MODE == 1 then joinSmallestServer()
     elseif SERVER_HOP_MODE == 2 then joinMostPlayedServer()
     else
         if switchServerPending then return end
         switchServerPending = true
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        cleanVisited()
+        -- 模式3 也嘗試找未訪問的服
+        local pid = game.PlaceId
+        local success = pcall(function()
+            local response = HttpService:JSONDecode(
+                game:HttpGet("https://games.roblox.com/v1/games/" .. pid .. "/servers/Public?sortOrder=Asc&limit=100")
+            )
+            if response.data and #response.data > 0 then
+                local valid = {}
+                for _, s in ipairs(response.data) do
+                    if s.id ~= game.JobId and not isRecentlyVisited(s.id) then
+                        table.insert(valid, s)
+                    end
+                end
+                if #valid > 0 then
+                    local pick = valid[math.random(1, #valid)]
+                    markVisited(pick.id)
+                    TeleportService:TeleportToPlaceInstance(pid, pick.id)
+                    return
+                end
+            end
+            TeleportService:Teleport(pid, LocalPlayer)
+        end)
+        if not success then TeleportService:Teleport(pid, LocalPlayer) end
     end
 end
 
@@ -214,17 +295,9 @@ local function findOrb(name)
     return nil
 end
 
--- ============================================================
--- [修正] checkAndHop
--- 問題：拿到一個 Orb 後，其他 Orb 不存在場上，
---       但 tasksDone 仍是 false → 永遠等不到 → 不跳服
--- 修正：每次呼叫時主動掃描場上，
---       啟用但場上找不到的 Orb → 自動視為完成
--- ============================================================
 local function checkAndHop()
     if JET_ORB_MODE == 2 or PHASE_ORB_MODE == 2 then return end
 
-    -- 場上不存在的 Orb 自動打勾
     if JET_ORB_MODE == 1 and not tasksDone.jetOrb and not findOrb("JetOrb") then
         print("[OrbScript] 場上無 JetOrb，視為完成")
         tasksDone.jetOrb = true
@@ -242,7 +315,6 @@ local function checkAndHop()
         tasksDone.materializeOrb = true
     end
 
-    -- 全部完成才跳服
     for key, done in pairs(tasksDone) do
         if not done then
             print(string.format("[OrbScript] 等待任務：%s", key))
