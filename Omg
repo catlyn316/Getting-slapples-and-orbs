@@ -50,9 +50,6 @@ local function teleportTo(cf)
 end
 local function nameCI(a, b) return string.lower(a) == string.lower(b) end
 
--- ============================================================
--- [修改] swFrame：拆成「傳送到Orb」和「跳服」兩個獨立按鈕
--- ============================================================
 local swFrame = Instance.new("Frame")
 swFrame.Size                = UDim2.new(0, 200, 0, 80)
 swFrame.Position            = UDim2.new(1, -210, 0, 14)
@@ -108,12 +105,10 @@ local function hideSwBtn()
     swFrame.Visible = false
 end
 
--- 傳送到 Orb（不跳服）
 tpBtn.MouseButton1Click:Connect(function()
     if pendingOrbCF then teleportTo(pendingOrbCF) end
 end)
 
--- 跳服（不傳送）
 hopBtn.MouseButton1Click:Connect(function()
     hideSwBtn(); hopServer()
 end)
@@ -132,7 +127,9 @@ local function joinSmallestServer()
             table.sort(response.data, function(a, b) return a.playing < b.playing end)
             local valid = {}
             for _, s in ipairs(response.data) do
-                if s.id ~= game.JobId and not isRecentlyVisited(s.id) then
+                if s.id ~= game.JobId
+                and not isRecentlyVisited(s.id)
+                and s.playing < s.maxPlayers then
                     table.insert(valid, s)
                 end
             end
@@ -145,10 +142,15 @@ local function joinSmallestServer()
                     table.insert(pool, valid[i])
                 end
             end
-            local targetServer = pool[math.random(1, math.max(1, #pool))]
+            if #pool == 0 then
+                print("[OrbScript] 前100服全滿或已訪問，改隨機跳")
+                TeleportService:Teleport(pid, LocalPlayer)
+                return
+            end
+            local targetServer = pool[math.random(1, #pool)]
             if targetServer and targetServer.id then
                 markVisited(targetServer.id)
-                print(string.format("[OrbScript] 跳往伺服器（%d人）", targetServer.playing))
+                print(string.format("[OrbScript] 跳往伺服器（%d/%d人）", targetServer.playing, targetServer.maxPlayers))
                 TeleportService:TeleportToPlaceInstance(pid, targetServer.id)
             else
                 TeleportService:Teleport(pid, LocalPlayer)
@@ -173,9 +175,16 @@ local function joinMostPlayedServer()
             local targetPlayers = math.floor(game.Players.MaxPlayers * 3 / 4)
             local valid = {}
             for _, s in ipairs(response.data) do
-                if s.id ~= game.JobId and not isRecentlyVisited(s.id) then
+                if s.id ~= game.JobId
+                and not isRecentlyVisited(s.id)
+                and s.playing < s.maxPlayers then
                     table.insert(valid, s)
                 end
+            end
+            if #valid == 0 then
+                print("[OrbScript] 無可用伺服器，改隨機跳")
+                TeleportService:Teleport(pid, LocalPlayer)
+                return
             end
             table.sort(valid, function(a, b)
                 return math.abs(a.playing - targetPlayers) < math.abs(b.playing - targetPlayers)
@@ -183,6 +192,7 @@ local function joinMostPlayedServer()
             local targetServer = valid[1]
             if targetServer and targetServer.id then
                 markVisited(targetServer.id)
+                print(string.format("[OrbScript] 跳往伺服器（%d/%d人）", targetServer.playing, targetServer.maxPlayers))
                 TeleportService:TeleportToPlaceInstance(pid, targetServer.id)
             else
                 TeleportService:Teleport(pid, LocalPlayer)
@@ -209,13 +219,16 @@ function hopServer()
             if response.data and #response.data > 0 then
                 local valid = {}
                 for _, s in ipairs(response.data) do
-                    if s.id ~= game.JobId and not isRecentlyVisited(s.id) then
+                    if s.id ~= game.JobId
+                    and not isRecentlyVisited(s.id)
+                    and s.playing < s.maxPlayers then
                         table.insert(valid, s)
                     end
                 end
                 if #valid > 0 then
                     local pick = valid[math.random(1, #valid)]
                     markVisited(pick.id)
+                    print(string.format("[OrbScript] 跳往伺服器（%d/%d人）", pick.playing, pick.maxPlayers))
                     TeleportService:TeleportToPlaceInstance(pid, pick.id)
                     return
                 end
