@@ -99,18 +99,29 @@ local function showSwBtn(cf, orbName)
     pendingOrbCF = cf
     swTitle.Text = "● " .. (orbName or "Orb") .. " 已偵測"
     swFrame.Visible = true
+    orbDetectionEnabled = false  -- 暫停偵測，防止重複觸發
 end
 local function hideSwBtn()
     pendingOrbCF = nil
     swFrame.Visible = false
+    orbDetectionEnabled = true   -- 恢復偵測
 end
 
 tpBtn.MouseButton1Click:Connect(function()
-    if pendingOrbCF then teleportTo(pendingOrbCF) end
+    if pendingOrbCF then
+        teleportTo(pendingOrbCF)
+        if JET_ORB_MODE == 2 then tasksDone.jetOrb = true end
+        if PHASE_ORB_MODE == 2 then tasksDone.phaseOrb = true end
+        hideSwBtn()
+        checkAndHop()
+    end
 end)
 
 hopBtn.MouseButton1Click:Connect(function()
-    hideSwBtn(); hopServer()
+    if JET_ORB_MODE == 2 then tasksDone.jetOrb = true end
+    if PHASE_ORB_MODE == 2 then tasksDone.phaseOrb = true end
+    hideSwBtn()
+    hopServer()
 end)
 
 -- ── 跳服：少人模式（升序第 8～50 台）──
@@ -182,13 +193,11 @@ local function joinMostPlayedServer()
                     table.insert(valid, s)
                 end
             end
-            -- 以多到少排列
             table.sort(valid, function(a, b) return a.playing > b.playing end)
             local pool = {}
             for i = 20, math.min(50, #valid) do
                 table.insert(pool, valid[i])
             end
-            -- 不足 20 台時取現有全部
             if #pool == 0 then
                 pool = valid
             end
@@ -282,8 +291,8 @@ end
 
 local tasksDone = {
     glove          = (GLOVE_TELEPORT == 0),
-    jetOrb         = (JET_ORB_MODE == 0 or JET_ORB_MODE == 2),
-    phaseOrb       = (PHASE_ORB_MODE == 0 or PHASE_ORB_MODE == 2),
+    jetOrb         = (JET_ORB_MODE == 0),
+    phaseOrb       = (PHASE_ORB_MODE == 0),
     siphonOrb      = (SIPHON_ORB_MODE == 0),
     materializeOrb = (MATERIALIZE_ORB_MODE == 0),
 }
@@ -296,7 +305,7 @@ local function findOrb(name)
     return nil
 end
 
-local function checkAndHop()
+function checkAndHop()
     if JET_ORB_MODE == 1 and not tasksDone.jetOrb and not findOrb("JetOrb") then
         print("[OrbScript] 場上無 JetOrb，視為完成")
         tasksDone.jetOrb = true
@@ -340,8 +349,8 @@ local function handleOrb(orbName, mode, onFound)
 end
 
 local function anyOrbPresent()
-    if JET_ORB_MODE == 1 and findOrb("JetOrb") then return true end
-    if PHASE_ORB_MODE == 1 and findOrb("PhaseOrb") then return true end
+    if JET_ORB_MODE ~= 0 and findOrb("JetOrb") then return true end
+    if PHASE_ORB_MODE ~= 0 and findOrb("PhaseOrb") then return true end
     if SIPHON_ORB_MODE == 1 and findOrb("SiphonOrb") then return true end
     if MATERIALIZE_ORB_MODE == 1 and findOrb("MATERIALIZEOrb") then return true end
     return false
@@ -350,7 +359,7 @@ end
 RunService.Heartbeat:Connect(function()
     if not orbDetectionEnabled then return end
 
-    -- JetOrb：Mode 1 自動傳送，Mode 2 顯示按鈕
+    -- JetOrb：Mode 1 自動傳送，Mode 2 顯示按鈕並暫停偵測
     if JET_ORB_MODE ~= 0 then
         handleOrb("JetOrb", JET_ORB_MODE, function(orb)
             if JET_ORB_MODE == 1 then
@@ -361,7 +370,7 @@ RunService.Heartbeat:Connect(function()
         end)
     end
 
-    -- PhaseOrb：Mode 1 自動傳送，Mode 2 顯示按鈕
+    -- PhaseOrb：Mode 1 自動傳送，Mode 2 顯示按鈕並暫停偵測
     if PHASE_ORB_MODE ~= 0 then
         handleOrb("PhaseOrb", PHASE_ORB_MODE, function(orb)
             if PHASE_ORB_MODE == 1 then
