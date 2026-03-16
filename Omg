@@ -11,7 +11,6 @@ local Character       = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait
 local RootPart        = Character:WaitForChild("HumanoidRootPart")
 
 local switchServerPending   = false
-local materializePromptOpen = false
 local orbDetectionEnabled   = false
 
 local visitedServers = {}
@@ -50,6 +49,7 @@ local function teleportTo(cf)
 end
 local function nameCI(a, b) return string.lower(a) == string.lower(b) end
 
+-- ── Orb 偵測按鈕（JetOrb / PhaseOrb Mode 2 用）──
 local swFrame = Instance.new("Frame")
 swFrame.Size                = UDim2.new(0, 200, 0, 80)
 swFrame.Position            = UDim2.new(1, -210, 0, 14)
@@ -113,11 +113,12 @@ hopBtn.MouseButton1Click:Connect(function()
     hideSwBtn(); hopServer()
 end)
 
+-- ── 跳服：少人模式（升序第 8～50 台）──
 local function joinSmallestServer()
     if switchServerPending then return end
     switchServerPending = true
     cleanVisited()
-    print("[OrbScript] 開始跳服（少人模式：第8~100）...")
+    print("[OrbScript] 開始跳服（少人模式：第8~50）...")
     local pid = game.PlaceId
     local success = pcall(function()
         local response = HttpService:JSONDecode(
@@ -134,7 +135,7 @@ local function joinSmallestServer()
                 end
             end
             local pool = {}
-            for i = 8, math.min(100, #valid) do
+            for i = 8, math.min(50, #valid) do
                 table.insert(pool, valid[i])
             end
             if #pool == 0 then
@@ -143,7 +144,7 @@ local function joinSmallestServer()
                 end
             end
             if #pool == 0 then
-                print("[OrbScript] 前100服全滿或已訪問，改隨機跳")
+                print("[OrbScript] 前50服全滿或已訪問，改隨機跳")
                 TeleportService:Teleport(pid, LocalPlayer)
                 return
             end
@@ -162,6 +163,7 @@ local function joinSmallestServer()
     if not success then TeleportService:Teleport(pid, LocalPlayer) end
 end
 
+-- ── 跳服：多人模式（降序不含額滿，第 20～50 台）──
 local function joinMostPlayedServer()
     if switchServerPending then return end
     switchServerPending = true
@@ -172,7 +174,6 @@ local function joinMostPlayedServer()
             game:HttpGet("https://games.roblox.com/v1/games/" .. pid .. "/servers/Public?sortOrder=Asc&limit=100")
         )
         if response.data and #response.data > 0 then
-            local targetPlayers = math.floor(game.Players.MaxPlayers * 3 / 4)
             local valid = {}
             for _, s in ipairs(response.data) do
                 if s.id ~= game.JobId
@@ -181,15 +182,22 @@ local function joinMostPlayedServer()
                     table.insert(valid, s)
                 end
             end
-            if #valid == 0 then
+            -- 以多到少排列
+            table.sort(valid, function(a, b) return a.playing > b.playing end)
+            local pool = {}
+            for i = 20, math.min(50, #valid) do
+                table.insert(pool, valid[i])
+            end
+            -- 不足 20 台時取現有全部
+            if #pool == 0 then
+                pool = valid
+            end
+            if #pool == 0 then
                 print("[OrbScript] 無可用伺服器，改隨機跳")
                 TeleportService:Teleport(pid, LocalPlayer)
                 return
             end
-            table.sort(valid, function(a, b)
-                return math.abs(a.playing - targetPlayers) < math.abs(b.playing - targetPlayers)
-            end)
-            local targetServer = valid[1]
+            local targetServer = pool[math.random(1, #pool)]
             if targetServer and targetServer.id then
                 markVisited(targetServer.id)
                 print(string.format("[OrbScript] 跳往伺服器（%d/%d人）", targetServer.playing, targetServer.maxPlayers))
@@ -238,44 +246,6 @@ function hopServer()
         if not success then TeleportService:Teleport(pid, LocalPlayer) end
     end
 end
-
-local matFrame = Instance.new("Frame")
-matFrame.Size                = UDim2.new(0, 240, 0, 70)
-matFrame.Position            = UDim2.new(1, -250, 1, -90)
-matFrame.BackgroundColor3    = Color3.fromRGB(20, 20, 20)
-matFrame.BackgroundTransparency = 0.2
-matFrame.BorderSizePixel     = 0
-matFrame.Visible             = false
-matFrame.Parent              = ScreenGui
-do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,8); c.Parent = matFrame end
-
-local matLbl = Instance.new("TextLabel")
-matLbl.Size = UDim2.new(1,0,0.5,0); matLbl.BackgroundTransparency = 1
-matLbl.Text = "有物質化光球，要傳送嗎？"; matLbl.TextColor3 = Color3.fromRGB(255,255,255)
-matLbl.TextScaled = true; matLbl.Font = Enum.Font.Gotham; matLbl.Parent = matFrame
-
-local matYes = Instance.new("TextButton")
-matYes.Size = UDim2.new(0.45,0,0.45,0); matYes.Position = UDim2.new(0.05,0,0.52,0)
-matYes.BackgroundColor3 = Color3.fromRGB(60,180,60); matYes.Text = "Yes"
-matYes.TextColor3 = Color3.fromRGB(255,255,255); matYes.TextScaled = true
-matYes.Font = Enum.Font.GothamBold; matYes.Parent = matFrame
-Instance.new("UICorner").Parent = matYes
-
-local matNo = Instance.new("TextButton")
-matNo.Size = UDim2.new(0.45,0,0.45,0); matNo.Position = UDim2.new(0.52,0,0.52,0)
-matNo.BackgroundColor3 = Color3.fromRGB(180,60,60); matNo.Text = "No"
-matNo.TextColor3 = Color3.fromRGB(255,255,255); matNo.TextScaled = true
-matNo.Font = Enum.Font.GothamBold; matNo.Parent = matFrame
-Instance.new("UICorner").Parent = matNo
-
-local pendingMatCF = nil
-local function showMatPrompt(cf) pendingMatCF = cf; matFrame.Visible = true; materializePromptOpen = true end
-local function hideMatPrompt()   matFrame.Visible = false; materializePromptOpen = false; pendingMatCF = nil end
-
-matYes.MouseButton1Click:Connect(function()
-    if pendingMatCF then teleportTo(pendingMatCF) end; hideMatPrompt()
-end)
-matNo.MouseButton1Click:Connect(function() hideMatPrompt() end)
 
 local function goToTeleport1()
     for _, v in ipairs(workspace:GetDescendants()) do
@@ -364,9 +334,6 @@ local function handleOrb(orbName, mode, onFound)
         orb.AncestryChanged:Connect(function(_, p)
             if p == nil then
                 handledOrbs[orb] = nil
-                if string.lower(orbName) == "materializeorb" and materializePromptOpen then
-                    hideMatPrompt()
-                end
             end
         end)
     end
@@ -383,6 +350,7 @@ end
 RunService.Heartbeat:Connect(function()
     if not orbDetectionEnabled then return end
 
+    -- JetOrb：Mode 1 自動傳送，Mode 2 顯示按鈕
     if JET_ORB_MODE ~= 0 then
         handleOrb("JetOrb", JET_ORB_MODE, function(orb)
             if JET_ORB_MODE == 1 then
@@ -393,6 +361,7 @@ RunService.Heartbeat:Connect(function()
         end)
     end
 
+    -- PhaseOrb：Mode 1 自動傳送，Mode 2 顯示按鈕
     if PHASE_ORB_MODE ~= 0 then
         handleOrb("PhaseOrb", PHASE_ORB_MODE, function(orb)
             if PHASE_ORB_MODE == 1 then
@@ -403,12 +372,14 @@ RunService.Heartbeat:Connect(function()
         end)
     end
 
+    -- SiphonOrb：僅 Mode 1 自動傳送
     if SIPHON_ORB_MODE == 1 then
         handleOrb("SiphonOrb", 1, function(orb)
             teleportTo(orb.CFrame); tasksDone.siphonOrb = true; checkAndHop()
         end)
     end
 
+    -- MATERIALIZEOrb：僅 Mode 1 自動傳送
     if MATERIALIZE_ORB_MODE == 1 then
         handleOrb("MATERIALIZEOrb", 1, function(orb)
             teleportTo(orb.CFrame); tasksDone.materializeOrb = true; checkAndHop()
