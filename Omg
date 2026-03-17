@@ -10,8 +10,8 @@ local LocalPlayer     = Players.LocalPlayer
 local Character       = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 local RootPart        = Character:WaitForChild("HumanoidRootPart")
 
-local switchServerPending   = false
-local orbDetectionEnabled   = false
+local switchServerPending = false
+local orbDetectionEnabled = false
 
 local visitedServers = {}
 local VISIT_COOLDOWN = 120
@@ -48,6 +48,54 @@ local function teleportTo(cf)
     if r then r.CFrame = cf end
 end
 local function nameCI(a, b) return string.lower(a) == string.lower(b) end
+
+-- 偽觸碰
+local function fakeTouch(orb)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+    firetouchinterest(head, orb, 0)
+    firetouchinterest(head, orb, 1)
+end
+
+-- 傳送 + 偽觸碰（0.5秒後雙重觸發）
+local function teleportAndTouch(orb)
+    teleportTo(orb.CFrame)
+    task.spawn(function()
+        task.wait(0.5)
+        if orb and orb.Parent then
+            teleportTo(orb.CFrame)
+            fakeTouch(orb)
+        end
+    end)
+end
+
+-- Error 手套偽攻擊 → 0.5秒後傳送 + 偽觸碰
+local function errorGlitchOrb(orb)
+    local rs = game:GetService("ReplicatedStorage")
+    local errorhit = rs:FindFirstChild("Errorhit")
+    if errorhit then
+        errorhit:FireServer(orb)
+    end
+    task.spawn(function()
+        task.wait(0.5)
+        if orb and orb.Parent then
+            teleportTo(orb.CFrame)
+            fakeTouch(orb)
+        end
+    end)
+end
+
+-- 檢查是否裝備 Error 手套
+local function isErrorGlove()
+    local ls = LocalPlayer:FindFirstChild("leaderstats")
+    if ls then
+        local glove = ls:FindFirstChild("Glove")
+        if glove and glove.Value == "Error" then return true end
+    end
+    return false
+end
 
 -- ── Orb 偵測按鈕（JetOrb / PhaseOrb Mode 2 用）──
 local swFrame = Instance.new("Frame")
@@ -94,23 +142,32 @@ hopBtn.Font                 = Enum.Font.GothamBold
 hopBtn.Parent               = swFrame
 do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,7); c.Parent = hopBtn end
 
-local pendingOrbCF = nil
-local function showSwBtn(cf, orbName)
-    pendingOrbCF = cf
-    swTitle.Text = "● " .. (orbName or "Orb") .. " 已偵測"
-    swFrame.Visible = true
-    orbDetectionEnabled = false  -- 暫停偵測，防止重複觸發
+local pendingOrbCF  = nil
+local pendingOrbRef = nil
+
+local function showSwBtn(cf, orbName, orbRef)
+    pendingOrbCF        = cf
+    pendingOrbRef       = orbRef
+    swTitle.Text        = "● " .. (orbName or "Orb") .. " 已偵測"
+    swFrame.Visible     = true
+    orbDetectionEnabled = false
 end
 local function hideSwBtn()
-    pendingOrbCF = nil
-    swFrame.Visible = false
-    orbDetectionEnabled = true   -- 恢復偵測
+    pendingOrbCF        = nil
+    pendingOrbRef       = nil
+    swFrame.Visible     = false
+    orbDetectionEnabled = true
 end
 
 tpBtn.MouseButton1Click:Connect(function()
-    if pendingOrbCF then
-        teleportTo(pendingOrbCF)
-        if JET_ORB_MODE == 2 then tasksDone.jetOrb = true end
+    if pendingOrbRef then
+        local orb = pendingOrbRef
+        if isErrorGlove() then
+            errorGlitchOrb(orb)
+        else
+            teleportAndTouch(orb)
+        end
+        if JET_ORB_MODE == 2   then tasksDone.jetOrb   = true end
         if PHASE_ORB_MODE == 2 then tasksDone.phaseOrb = true end
         hideSwBtn()
         checkAndHop()
@@ -118,7 +175,7 @@ tpBtn.MouseButton1Click:Connect(function()
 end)
 
 hopBtn.MouseButton1Click:Connect(function()
-    if JET_ORB_MODE == 2 then tasksDone.jetOrb = true end
+    if JET_ORB_MODE == 2   then tasksDone.jetOrb   = true end
     if PHASE_ORB_MODE == 2 then tasksDone.phaseOrb = true end
     hideSwBtn()
     hopServer()
@@ -359,39 +416,59 @@ end
 RunService.Heartbeat:Connect(function()
     if not orbDetectionEnabled then return end
 
-    -- JetOrb：Mode 1 自動傳送，Mode 2 顯示按鈕並暫停偵測
+    -- JetOrb
     if JET_ORB_MODE ~= 0 then
         handleOrb("JetOrb", JET_ORB_MODE, function(orb)
             if JET_ORB_MODE == 1 then
-                teleportTo(orb.CFrame); tasksDone.jetOrb = true; checkAndHop()
+                teleportAndTouch(orb)
+                tasksDone.jetOrb = true
+                checkAndHop()
             else
-                showSwBtn(orb.CFrame, "JetOrb")
+                if isErrorGlove() then
+                    errorGlitchOrb(orb)
+                    tasksDone.jetOrb = true
+                    checkAndHop()
+                else
+                    showSwBtn(orb.CFrame, "JetOrb", orb)
+                end
             end
         end)
     end
 
-    -- PhaseOrb：Mode 1 自動傳送，Mode 2 顯示按鈕並暫停偵測
+    -- PhaseOrb
     if PHASE_ORB_MODE ~= 0 then
         handleOrb("PhaseOrb", PHASE_ORB_MODE, function(orb)
             if PHASE_ORB_MODE == 1 then
-                teleportTo(orb.CFrame); tasksDone.phaseOrb = true; checkAndHop()
+                teleportAndTouch(orb)
+                tasksDone.phaseOrb = true
+                checkAndHop()
             else
-                showSwBtn(orb.CFrame, "PhaseOrb")
+                if isErrorGlove() then
+                    errorGlitchOrb(orb)
+                    tasksDone.phaseOrb = true
+                    checkAndHop()
+                else
+                    showSwBtn(orb.CFrame, "PhaseOrb", orb)
+                end
             end
         end)
     end
 
-    -- SiphonOrb：僅 Mode 1 自動傳送
+    -- SiphonOrb：模式1 傳送 + 偽觸碰
     if SIPHON_ORB_MODE == 1 then
         handleOrb("SiphonOrb", 1, function(orb)
-            teleportTo(orb.CFrame); tasksDone.siphonOrb = true; checkAndHop()
+            teleportAndTouch(orb)
+            tasksDone.siphonOrb = true
+            checkAndHop()
         end)
     end
 
-    -- MATERIALIZEOrb：僅 Mode 1 自動傳送
+    -- MATERIALIZEOrb：模式1 傳送 + 偽觸碰
     if MATERIALIZE_ORB_MODE == 1 then
         handleOrb("MATERIALIZEOrb", 1, function(orb)
-            teleportTo(orb.CFrame); tasksDone.materializeOrb = true; checkAndHop()
+            teleportAndTouch(orb)
+            tasksDone.materializeOrb = true
+            checkAndHop()
         end)
     end
 end)
@@ -399,6 +476,13 @@ end)
 task.spawn(function()
     task.wait(1)
     goToTeleport1()
+    -- 等待角色裝備任何 Tool
+    print("[OrbScript] 等待裝備 Tool...")
+    repeat
+        task.wait(0.2)
+        Character = LocalPlayer.Character
+    until Character and Character:FindFirstChildOfClass("Tool")
+    print("[OrbScript] 偵測到 Tool，繼續執行")
     task.wait(0.5)
     handleGloves()
     tasksDone.glove = true
