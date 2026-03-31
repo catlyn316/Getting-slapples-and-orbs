@@ -473,9 +473,9 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-task.spawn(function()
-    task.wait(1)
+local function runMainFlow()
     goToTeleport1()
+
     -- 等待角色裝備任何 Tool
     print("[OrbScript] 等待裝備 Tool...")
     repeat
@@ -495,7 +495,43 @@ task.spawn(function()
         tasksDone.siphonOrb = true; tasksDone.materializeOrb = true
         checkAndHop()
     end
-end)
+end
+
+local function resetFlow()
+    print("[OrbScript] 重置流程...")
+    switchServerPending  = false
+    orbDetectionEnabled  = false
+    handledOrbs          = {}
+    swFrame.Visible      = false
+    pendingOrbCF         = nil
+    pendingOrbRef        = nil
+    tasksDone = {
+        glove          = (GLOVE_TELEPORT == 0),
+        jetOrb         = (JET_ORB_MODE == 0),
+        phaseOrb       = (PHASE_ORB_MODE == 0),
+        siphonOrb      = (SIPHON_ORB_MODE == 0),
+        materializeOrb = (MATERIALIZE_ORB_MODE == 0),
+    }
+    runMainFlow()
+end
+
+-- Watchdog：若 10 秒後 switchServerPending 仍為 false（未觸發跳服），重新執行流程
+local function startWithWatchdog()
+    task.wait(1)
+    task.spawn(runMainFlow)
+
+    task.spawn(function()
+        task.wait(10)   -- 載入後等待 10 秒
+        if not switchServerPending then
+            print("[OrbScript] ⚠ 10秒內未跳服，重新開始流程")
+            resetFlow()
+        else
+            print("[OrbScript] ✓ 10秒內已觸發跳服，Watchdog 結束")
+        end
+    end)
+end
+
+startWithWatchdog()
 
 print("[OrbScript] 腳本已啟動")
 print(string.format("  VAR1=%d VAR2=%d VAR3=%d VAR4=%d VAR5=%d VAR6=%d",
